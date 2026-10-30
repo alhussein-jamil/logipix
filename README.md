@@ -4,7 +4,7 @@ Java solver for Logipix path puzzles, written in 2022 by Alhussein Jamil and Jia
 
 A cell holding a positive number *n* must be joined to exactly one other *n* by a path of *n* cells, counting both ends. Paths do not cross or share a cell. Zero is an empty cell a path may cross. A one occupies only its own cell.
 
-The search is backtracking. Smaller clues are tried first. Before the search, and again whenever a path is placed, candidates that the current grid rules out are dropped.
+Equal clues are paired by a path of that exact length. The solver lists the legal routes for each pair, then fills the board from the clue with the fewest routes still open. The 40×24 board has no solution.
 
 ## Puzzle file
 
@@ -15,7 +15,7 @@ Puzzles are concatenated. Each one is a width, a height, then `width * height` i
 3 0 3
 ```
 
-[`puzzles/logix.txt`](puzzles/logix.txt) is the original set of ten boards. The later boards are exhaustive searches and can run for minutes or longer. Try the three-cell example above before running the whole file.
+[`puzzles/logix.txt`](puzzles/logix.txt) is the original set of ten boards, from 3×3 through 30×35.
 
 ## Build and run
 

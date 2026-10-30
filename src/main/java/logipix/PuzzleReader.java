@@ -33,23 +33,15 @@ final class PuzzleReader implements AutoCloseable {
             throw new IllegalArgumentException(
                     "puzzle dimensions must be positive, got " + width + "x" + height);
         }
-        CellOrder ranking = new CellOrder(height, width);
-        Puzzle puzzle = new Puzzle(width, height, ranking);
+        Puzzle puzzle = new Puzzle(width, height);
         int cells = width * height;
         for (int i = 0; i < cells; i++) {
             if (!scanner.hasNextInt()) {
                 throw new IllegalArgumentException(
                         "puzzle " + width + "x" + height + " ended early at cell " + i);
             }
-            int clue = scanner.nextInt();
-            int row = i / width;
-            int col = i % width;
-            puzzle.entries[row][col] = clue;
-            ranking.indexes[i][0] = row;
-            ranking.indexes[i][1] = col;
-            ranking.clues[i] = clue;
+            puzzle.entries[i / width][i % width] = scanner.nextInt();
         }
-        ranking.sortByClue();
         return puzzle;
     }
 

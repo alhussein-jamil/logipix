@@ -1,210 +1,278 @@
 package logipix;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
- * Backtracking Logipix search.
- * Clues are tried in increasing order. Candidates are collected once, then
- * discarded when the partial grid makes them illegal.
+ * Covers every clue above 1 with one exact-length path to another equal clue.
+ * Paths are generated per pair, then chosen so they never share a cell.
  */
 final class Solver {
     private final Puzzle puzzle;
-    private final List<List<String>> paths;
+    private final int width;
+    private final int height;
+    private final int cellCount;
+    private final boolean[] used;
+    private final int[] moveScore = new int[4];
+    private final List<int[]> routes = new ArrayList<>();
+    private final List<List<Integer>> touching;
+    private int maxClue;
 
     Solver(Puzzle puzzle) {
         this.puzzle = puzzle;
-        int cells = puzzle.width * puzzle.height;
-        paths = new ArrayList<>(cells);
-        for (int i = 0; i < cells; i++) {
-            paths.add(null);
+        width = puzzle.width;
+        height = puzzle.height;
+        cellCount = width * height;
+        used = new boolean[cellCount];
+        touching = new ArrayList<>(cellCount);
+        for (int cell = 0; cell < cellCount; cell++) {
+            touching.add(new ArrayList<>());
         }
-    }
-
-    static int colorId(int row, int col) {
-        return 2 + (row + col) * (1 + row + col) / 2 + col;
     }
 
     Puzzle solve() {
-        excludeAll();
-        int order = 0;
-        int cells = puzzle.width * puzzle.height;
-        while (order < cells && clueAt(order) == 0) {
-            order++;
+        int[] tally = tally();
+        if (tally == null) {
+            return null;
         }
-        return search(order, puzzle, null, true);
-    }
-
-    private int clueAt(int order) {
-        int row = puzzle.ranking.indexes[order][0];
-        int col = puzzle.ranking.indexes[order][1];
-        return puzzle.entries[row][col];
-    }
-
-    private void excludeAll() {
-        for (int row = 0; row < puzzle.height; row++) {
-            for (int col = 0; col < puzzle.width; col++) {
-                if (puzzle.entries[row][col] != 0 && puzzle.colors[row][col][0] >= 0) {
-                    markForced(puzzle, row, col, true);
+        for (int cell = 0; cell < cellCount; cell++) {
+            if (clueAt(cell) == 1) {
+                puzzle.direction[row(cell)][col(cell)] = 6;
+                used[cell] = true;
+            }
+        }
+        for (int clue = 2; clue <= maxClue; clue++) {
+            if (tally[clue] == 0) {
+                continue;
+            }
+            int[] ends = new int[tally[clue]];
+            int count = 0;
+            for (int cell = 0; cell < cellCount; cell++) {
+                if (clueAt(cell) == clue) {
+                    ends[count++] = cell;
+                }
+            }
+            for (int i = 0; i < ends.length; i++) {
+                for (int j = i + 1; j < ends.length; j++) {
+                    collect(ends[i], ends[j], clue - 1);
                 }
             }
         }
+        return cover() ? puzzle : null;
     }
 
-    private Puzzle search(int order, Puzzle board, int[] move, boolean beginning) {
-        int cells = board.width * board.height;
-        if (order >= cells) {
-            return board;
-        }
-        int row = board.ranking.indexes[order][0];
-        int col = board.ranking.indexes[order][1];
-        if (!beginning) {
-            place(board, row, col, move);
-            order++;
-            if (order >= cells) {
-                return board;
+    private int[] tally() {
+        maxClue = 0;
+        for (int cell = 0; cell < cellCount; cell++) {
+            int clue = clueAt(cell);
+            if (clue < 0) {
+                return null;
             }
-            row = board.ranking.indexes[order][0];
-            col = board.ranking.indexes[order][1];
-        }
-        while (board.entries[row][col] <= 1 || board.colors[row][col][0] <= 0) {
-            if (board.entries[row][col] == 1) {
-                board.colors[row][col][0] = -1;
-                board.direction[row][col] = 6;
-                board.colors[row][col][1] = 1;
-            }
-            order++;
-            if (order >= cells) {
-                return board;
-            }
-            row = board.ranking.indexes[order][0];
-            col = board.ranking.indexes[order][1];
-        }
-        for (String encoded : pathsAt(board, row, col)) {
-            int[] candidate = decode(encoded);
-            if (board.accepts(row, col, candidate)) {
-                Puzzle solved = search(order, board.copy(), candidate, false);
-                if (solved != null) {
-                    return solved;
-                }
+            if (clue > maxClue) {
+                maxClue = clue;
             }
         }
-        return null;
+        int[] tally = new int[maxClue + 1];
+        for (int cell = 0; cell < cellCount; cell++) {
+            int clue = clueAt(cell);
+            if (clue > 0) {
+                tally[clue]++;
+            }
+        }
+        for (int clue = 2; clue <= maxClue; clue++) {
+            if ((tally[clue] & 1) != 0) {
+                return null;
+            }
+        }
+        return tally;
     }
 
-    private void place(Puzzle board, int row, int col, int[] move) {
-        int clue = board.entries[row][col];
-        int r = row;
-        int c = col;
-        board.colors[r][c][0] = -1;
-        board.colors[r][c][1] = board.entries[r][c];
-        reserveAround(r, c, board);
-        for (int step = 0; step < clue - 1; step++) {
-            c += Directions.COLUMN[move[step]];
-            r += Directions.ROW[move[step]];
-            if (step < clue - 2) {
-                board.direction[r][c] = move[step + 1] + 2;
-            } else {
-                board.direction[r][c] = 1;
-            }
-            board.colors[r][c][0] = -1;
-            board.colors[r][c][1] = board.entries[r][c];
-            reserveAround(r, c, board);
-        }
-        board.direction[row][col] = move[0] + 7;
-    }
-
-    private void reserveAround(int row, int col, Puzzle board) {
-        for (int step = 0; step < 4; step++) {
-            int r = row + Directions.ROW[step];
-            int c = col + Directions.COLUMN[step];
-            if (r >= 0 && r < board.height && c >= 0 && c < board.width
-                    && board.entries[r][c] != 0
-                    && board.colors[r][c][0] > 0) {
-                markForced(board, r, c, false);
-            }
-        }
-    }
-
-    private void markForced(Puzzle board, int row, int col, boolean first) {
-        if (first) {
-            collectPaths(board, row, col);
-        }
-        int clue = board.entries[row][col];
-        if (clue <= 1) {
-            board.colors[row][col][0] = -1;
-            board.colors[row][col][1] = clue;
+    private void collect(int start, int target, int steps) {
+        int distance = manhattan(start, target);
+        if (distance > steps || ((steps - distance) & 1) != 0) {
             return;
         }
-        List<String> matrix = pathsAt(board, row, col);
-        int[][] hits = new int[board.height][board.width];
-        board.colors[row][col][0] = colorId(row, col);
-        board.colors[row][col][1] = clue;
-        int stillLegal = matrix.size();
-        boolean[] legal = new boolean[stillLegal];
-        for (int g = 0; g < matrix.size(); g++) {
-            legal[g] = board.accepts(row, col, decode(matrix.get(g)));
-            if (!legal[g]) {
-                stillLegal--;
-            }
-        }
-        for (int g = 0; g < matrix.size(); g++) {
-            int[] move = decode(matrix.get(g));
-            int r = row;
-            int c = col;
-            if (first || legal[g]) {
-                for (int step = 0; step < clue - 1; step++) {
-                    c += Directions.COLUMN[move[step]];
-                    r += Directions.ROW[move[step]];
-                    hits[r][c] += 1;
-                }
-                if (hits[r][c] >= stillLegal) {
-                    board.colors[r][c][0] = -colorId(row, col);
-                    board.colors[r][c][1] = clue;
-                }
-            }
-        }
+        int cap = steps <= 8 ? 4_096 : 512;
+        int[] path = new int[steps + 1];
+        int[] found = {0};
+        path[0] = start;
+        used[start] = true;
+        gather(start, target, steps, path, 1, cap, found);
+        used[start] = false;
     }
 
-    private void collectPaths(Puzzle board, int row, int col) {
-        List<String> found = new ArrayList<>();
-        paths.set(index(board, row, col), found);
-        int clue = board.entries[row][col];
-        if (clue <= 1) {
+    private void gather(
+            int cell, int target, int stepsLeft, int[] path, int length, int cap, int[] found) {
+        if (found[0] >= cap) {
             return;
         }
-        int[] movements = new int[clue - 1];
-        boolean more = true;
-        while (more) {
-            board.failedAt = clue - 2;
-            if (board.accepts(row, col, movements)) {
-                found.add(encode(movements));
+        if (stepsLeft == 0) {
+            if (cell == target) {
+                addRoute(path, length);
+                found[0]++;
             }
-            more = Moves.next(movements, board.failedAt);
+            return;
+        }
+        int distance = manhattan(cell, target);
+        if (distance > stepsLeft || ((stepsLeft - distance) & 1) != 0) {
+            return;
+        }
+        int[] order = orderedMoves(cell, target);
+        for (int i = 0; i < 4 && found[0] < cap; i++) {
+            int dir = order[i];
+            int nextRow = row(cell) + Directions.ROW[dir];
+            int nextCol = col(cell) + Directions.COLUMN[dir];
+            if (!canStep(nextRow, nextCol, target, stepsLeft)) {
+                continue;
+            }
+            int next = nextRow * width + nextCol;
+            path[length] = next;
+            used[next] = true;
+            gather(next, target, stepsLeft - 1, path, length + 1, cap, found);
+            used[next] = false;
         }
     }
 
-    private List<String> pathsAt(Puzzle board, int row, int col) {
-        return paths.get(index(board, row, col));
+    private void addRoute(int[] path, int length) {
+        int[] copy = Arrays.copyOf(path, length);
+        int index = routes.size();
+        routes.add(copy);
+        touching.get(copy[0]).add(index);
+        touching.get(copy[length - 1]).add(index);
     }
 
-    private static int index(Puzzle board, int row, int col) {
-        return row * board.width + col;
-    }
-
-    private static String encode(int[] movements) {
-        StringBuilder encoded = new StringBuilder(movements.length);
-        for (int movement : movements) {
-            encoded.append(movement);
+    private boolean cover() {
+        int bestCell = -1;
+        int bestCount = Integer.MAX_VALUE;
+        for (int cell = 0; cell < cellCount; cell++) {
+            if (used[cell] || clueAt(cell) <= 1) {
+                continue;
+            }
+            int choices = 0;
+            for (int index : touching.get(cell)) {
+                if (fits(routes.get(index))) {
+                    choices++;
+                }
+            }
+            if (choices == 0) {
+                return false;
+            }
+            if (choices < bestCount) {
+                bestCount = choices;
+                bestCell = cell;
+            }
         }
-        return encoded.toString();
+        if (bestCell < 0) {
+            return true;
+        }
+        for (int index : touching.get(bestCell)) {
+            int[] path = routes.get(index);
+            if (!fits(path)) {
+                continue;
+            }
+            take(path);
+            if (cover()) {
+                return true;
+            }
+            drop(path);
+        }
+        return false;
     }
 
-    private static int[] decode(String encoded) {
-        int[] moves = new int[encoded.length()];
-        for (int i = 0; i < encoded.length(); i++) {
-            moves[i] = encoded.charAt(i) - '0';
+    private boolean fits(int[] path) {
+        for (int cell : path) {
+            if (used[cell]) {
+                return false;
+            }
         }
-        return moves;
+        return true;
+    }
+
+    private void take(int[] path) {
+        for (int cell : path) {
+            used[cell] = true;
+        }
+        paint(path);
+    }
+
+    private void drop(int[] path) {
+        for (int cell : path) {
+            used[cell] = false;
+            puzzle.direction[row(cell)][col(cell)] = 0;
+        }
+    }
+
+    private void paint(int[] path) {
+        puzzle.direction[row(path[0])][col(path[0])] = stepDir(path[0], path[1]) + 7;
+        for (int i = 1; i < path.length - 1; i++) {
+            puzzle.direction[row(path[i])][col(path[i])] = stepDir(path[i], path[i + 1]) + 2;
+        }
+        puzzle.direction[row(path[path.length - 1])][col(path[path.length - 1])] = 1;
+    }
+
+    private boolean canStep(int row, int col, int target, int stepsLeft) {
+        if (row < 0 || col < 0 || row >= height || col >= width) {
+            return false;
+        }
+        int cell = row * width + col;
+        if (used[cell]) {
+            return false;
+        }
+        if (cell == target) {
+            return stepsLeft == 1;
+        }
+        return puzzle.entries[row][col] == 0;
+    }
+
+    private int[] orderedMoves(int cell, int target) {
+        int[] order = {0, 1, 2, 3};
+        for (int dir = 0; dir < 4; dir++) {
+            int nextRow = row(cell) + Directions.ROW[dir];
+            int nextCol = col(cell) + Directions.COLUMN[dir];
+            int score = 1_000;
+            if (nextRow >= 0 && nextCol >= 0 && nextRow < height && nextCol < width) {
+                score = Math.abs(row(target) - nextRow) + Math.abs(col(target) - nextCol);
+            }
+            moveScore[dir] = score;
+        }
+        for (int i = 1; i < 4; i++) {
+            int dir = order[i];
+            int score = moveScore[dir];
+            int j = i;
+            while (j > 0 && moveScore[order[j - 1]] > score) {
+                order[j] = order[j - 1];
+                j--;
+            }
+            order[j] = dir;
+        }
+        return order;
+    }
+
+    private int clueAt(int cell) {
+        return puzzle.entries[row(cell)][col(cell)];
+    }
+
+    private int manhattan(int from, int to) {
+        return Math.abs(row(from) - row(to)) + Math.abs(col(from) - col(to));
+    }
+
+    private int stepDir(int from, int to) {
+        int drow = row(to) - row(from);
+        int dcol = col(to) - col(from);
+        for (int dir = 0; dir < 4; dir++) {
+            if (Directions.ROW[dir] == drow && Directions.COLUMN[dir] == dcol) {
+                return dir;
+            }
+        }
+        throw new IllegalStateException("path step is not orthogonal");
+    }
+
+    private int row(int cell) {
+        return cell / width;
+    }
+
+    private int col(int cell) {
+        return cell - row(cell) * width;
     }
 }
